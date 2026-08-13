@@ -13,3 +13,9 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+
+# Locally installed dev tools (make bin-deps)
+/bin/
+
+# Coverage output (make test-cov)
+coverage.out
