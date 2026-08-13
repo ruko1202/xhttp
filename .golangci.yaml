@@ -1,0 +1,91 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    # Correctness
+    - errcheck        # Unchecked errors
+    - govet           # Suspicious constructs
+    - ineffassign     # Assignments never used
+    - staticcheck     # Static analysis suite
+    - unused          # Unused code
+    - bodyclose       # Unclosed HTTP response bodies
+    - noctx           # HTTP requests sent without a context
+    - errorlint       # Error wrapping and comparison mistakes
+    - nilerr          # Returning nil on a non-nil error
+    - copyloopvar     # Loop variable aliasing
+
+    # Style and clarity
+    - revive          # Golint successor, including exported-symbol docs
+    - misspell        # Commonly misspelled English words
+    - godot           # Comments end in a period
+    - whitespace      # Leading/trailing newlines in blocks
+    - gocritic        # Opinionated checks for style and performance
+    - unconvert       # Redundant type conversions
+    - usestdlibvars   # Use stdlib constants instead of literals
+    - nakedret        # Naked returns in long functions
+    - prealloc        # Slice preallocation opportunities
+
+    # Complexity
+    - gocyclo
+    - nestif
+
+    # Security
+    - gosec
+
+    # Tests
+    - thelper         # Test helpers without t.Helper()
+    - tparallel       # Misuse of t.Parallel()
+
+  settings:
+    gocyclo:
+      min-complexity: 15
+
+    nestif:
+      min-complexity: 4
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: indent-error-flow
+        - name: errorf
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+    gosec:
+      excludes:
+        # G107 flags a URL taken from a variable. Passing caller-supplied URLs
+        # is the entire purpose of an HTTP client library.
+        - G107
+
+    misspell:
+      locale: US
+
+    godot:
+      scope: declarations
+
+  exclusions:
+    rules:
+      # Tests are where body logging and long table-driven cases are legitimate.
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - gosec
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
