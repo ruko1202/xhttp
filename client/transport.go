@@ -10,6 +10,8 @@ import (
 	"github.com/ruko1202/xlog/xfield"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/ruko1202/xhttp/sanitize"
+
 	"github.com/ruko1202/xhttp/internal/xtracer"
 )
 
@@ -20,7 +22,7 @@ type transport struct {
 	tr              *http.Transport
 	beforeRoundTrip []func(context.Context, *http.Request)
 	afterRoundTrip  []func(context.Context, *http.Response)
-	sanitizer       Sanitizer
+	sanitizer       sanitize.Sanitizer
 	tracer          trace.Tracer
 	// logBodies is off unless a caller opts in with WithBodyLogging. Bodies are
 	// the hardest thing to redact — their shape is arbitrary, so a secret inside
@@ -54,7 +56,7 @@ func newTransport() *transport {
 			ExpectContinueTimeout: 1 * time.Second,
 			IdleConnTimeout:       90 * time.Second,
 		},
-		sanitizer: NewNoopSanitizer(),
+		sanitizer: sanitize.NewNoopSanitizer(),
 		// Resolved once at construction. A client built before
 		// xhttp.SetTracerProvider keeps the no-op tracer, which is the quiet
 		// direction to be wrong in.

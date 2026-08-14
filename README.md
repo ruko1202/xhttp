@@ -7,7 +7,7 @@ in through [xlog](https://github.com/ruko1202/xlog).
 go get github.com/ruko1202/xhttp
 ```
 
-Four packages, imported separately so you only pay for what you use — `client`
+Five packages, imported separately so you only pay for what you use — `client`
 is plain `net/http` and does not pull Echo into your binary:
 
 | Package | What it gives you |
@@ -16,6 +16,7 @@ is plain `net/http` and does not pull Echo into your binary:
 | [`server`](#server) | the Echo v5 lifecycle shell: bind, start, stop, request logging |
 | [`infra`](#infra) | a whole infra server — health, version, metrics, pprof, swagger |
 | [`lifecycle`](#lifecycle) | the graceful-drain signal that makes readiness meaningful |
+| [`sanitize`](#sanitize) | the redaction policy `client` and `server` both log through |
 
 Requires Go 1.25 and, for `server`/`infra`, Echo v5.2.1 or newer. The Echo
 dependency is deliberate and unabstracted: `server.Echo()` hands you the real
@@ -93,6 +94,9 @@ func (redactor) SanitizeHeaders(h http.Header) http.Header {
 
 func (redactor) SanitizeBody(b []byte) []byte { return b }
 ```
+
+The interface lives in [`sanitize`](#sanitize), so one policy value serves both
+the outgoing client and the inbound request logger.
 
 A `Sanitizer` must not mutate its argument: `http.Client` re-enters `RoundTrip`
 with the same `*http.Request` on retries and redirects, so a mutating sanitizer
@@ -234,6 +238,26 @@ of seconds forever; logging them buries everything else.
 
 A `Check` with a nil `Probe` makes `New` panic. A wiring typo must not become a
 replica that reports ready forever without having verified anything.
+
+## `sanitize`
+
+`Sanitizer`, the interface both halves of this library log through, plus the
+no-op default. It is its own package for the same reason `lifecycle` is: it
+imports nothing but `net/http`, so a service can depend on the policy type
+without pulling in either Echo or the transport stack.
+
+```go
+import "github.com/ruko1202/xhttp/sanitize"
+
+var _ sanitize.Sanitizer = myRedactor{}
+
+httpc := client.NewClient(client.WithSanitizer(myRedactor{}))
+mw := server.RequestLoggingMiddlewareWithSanitizer(myRedactor{})
+```
+
+There is deliberately one name for this type rather than a per-package alias:
+a service that redacts credentials wants the same policy applied on the way out
+and on the way in, and two names for one contract only invite them to drift.
 
 ## `lifecycle`
 

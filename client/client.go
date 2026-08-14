@@ -3,7 +3,7 @@
 //
 // Every exchange is logged through xlog and wrapped in a span, so outgoing
 // calls show up in traces alongside the operation that made them. What may be
-// written to those logs is the caller's decision: see Sanitizer.
+// written to those logs is the caller's decision: see sanitize.Sanitizer.
 //
 // The zero-configuration client is not redaction-safe. NewClient() with no
 // options logs URLs and headers verbatim, so any service whose requests carry

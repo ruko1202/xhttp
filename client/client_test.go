@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ruko1202/xhttp/client"
+	"github.com/ruko1202/xhttp/sanitize"
 )
 
 func TestNewClientDefaults(t *testing.T) {
@@ -158,11 +159,11 @@ func TestPublicSurfaceIsUsableFromOutside(t *testing.T) {
 	// Compiling this file at all proves the exported API is self-sufficient:
 	// the package is client_test, so an unexported type leaking into a public
 	// signature would fail to build here.
-	var _ client.Sanitizer = client.NewNoopSanitizer()
+	var _ sanitize.Sanitizer = sanitize.NewNoopSanitizer()
 
 	opts := []client.Option{
 		client.WithTimeout(time.Second),
-		client.WithSanitizer(client.NewNoopSanitizer()),
+		client.WithSanitizer(sanitize.NewNoopSanitizer()),
 		client.WithoutRedirect(),
 		client.WithCustomRedirectFlow(func(*http.Request, []*http.Request) error { return nil }),
 	}
