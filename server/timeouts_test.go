@@ -40,7 +40,7 @@ func TestApplyTimeoutsStampsConfiguredValues(t *testing.T) {
 
 // TestApplyTimeoutsLeavesUnsetFieldsAlone is the compatibility half: a Config
 // that sets no timeouts must not write anything, so a service upgrading to this
-// version keeps the behaviour it had.
+// version keeps the behavior it had.
 //
 // It asserts against a bare http.Server rather than one Echo built, and that is
 // the point of the test rather than a shortcut: Echo pre-sets ReadTimeout to 30s
@@ -80,14 +80,15 @@ func TestApplyTimeoutsPreservesExistingValues(t *testing.T) {
 // it. A regression that drops BeforeServeFunc would keep them green while
 // shipping a server with no timeouts at all.
 //
-// It asserts through behaviour rather than by reading a field, because the
+// It asserts through behavior rather than by reading a field, because the
 // http.Server Echo builds is not reachable from here. A connection that opens
 // and then sends nothing must be closed by the server once ReadHeaderTimeout
 // elapses — which is exactly the slowloris case these timeouts exist for.
 func TestStartInstallsTimeoutsOnTheRunningServer(t *testing.T) {
 	t.Parallel()
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	port := ln.Addr().(*net.TCPAddr).Port
 	require.NoError(t, ln.Close())
@@ -138,7 +139,8 @@ func dialUntilServing(t *testing.T, addr string) net.Conn {
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		dialer := net.Dialer{Timeout: 200 * time.Millisecond}
+		conn, err := dialer.DialContext(context.Background(), "tcp", addr)
 		if err == nil {
 			return conn
 		}

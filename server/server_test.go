@@ -134,12 +134,12 @@ func get(t *testing.T, url string) (body string, ok bool) {
 // leave Stop calling the no-op and the shutdown hanging.
 //
 // Honest scope: this test does NOT reproduce the race on its own. Waiting for
-// the bind synchronises the two goroutines and closes the window, and removing
+// the bind synchronizes the two goroutines and closes the window, and removing
 // that wait makes the test race Stop against a server that may not have started
 // — flaky in the other direction. What reproduced it reliably was the Console's
 // TestDrainAndStopOrdersTeardown, which starts both servers and stops them from
 // a third goroutine. This test pins the contract and the no-op-before-Start
-// behaviour; -race in a consumer's suite is what guards the field itself.
+// behavior; -race in a consumer's suite is what guards the field itself.
 func TestStopIsSafeFromAnotherGoroutine(t *testing.T) {
 	t.Parallel()
 

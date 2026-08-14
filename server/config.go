@@ -36,7 +36,7 @@ type Config struct {
 	// distinction matters because Echo pre-sets ReadTimeout to 30s on the
 	// server it builds (its own gosec G112 default) and only then calls the
 	// hook; the other three it leaves unset. A library-imposed default here
-	// would silently change the behaviour of every service that upgrades, so
+	// would silently change the behavior of every service that upgrades, so
 	// unset fields are left alone.
 
 	// ReadHeaderTimeout caps how long a client may take to send request
