@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/labstack/echo/v5"
 	"github.com/ruko1202/xlog"
@@ -26,9 +27,14 @@ import (
 
 // Server is an Echo instance plus its lifecycle. Construct it with New.
 type Server struct {
-	cfg             Config
-	e               *echo.Echo
-	serverStopF     func()
+	cfg Config
+	e   *echo.Echo
+	// serverStopF is written by Start and read by Stop, which run on different
+	// goroutines by construction: a service starts the server in one and stops
+	// it from its shutdown path in another. A plain field here is a data race
+	// that -race reports and that can, in principle, lose the cancel func and
+	// hang a shutdown.
+	serverStopF     atomic.Pointer[context.CancelFunc]
 	notFoundHandler echo.HandlerFunc
 }
 
@@ -37,9 +43,14 @@ func New(cfg Config, opts ...Option) *Server {
 	s := &Server{
 		cfg:             cfg,
 		e:               echo.New(),
-		serverStopF:     func() {},
 		notFoundHandler: NotFoundHandler,
 	}
+
+	// Stop before Start is a no-op rather than a nil dereference: a service that
+	// fails during construction and tears down what it has built should not
+	// panic on the way out.
+	noop := context.CancelFunc(func() {})
+	s.serverStopF.Store(&noop)
 
 	for _, opt := range opts {
 		opt(s)
@@ -65,7 +76,7 @@ func (s *Server) Start(ctx context.Context) error {
 	xlog.Infof(ctx, "starting http server '%s' on %s", s.cfg.Name, s.cfg.BuildHostPort())
 
 	ctx, cancel := context.WithCancel(ctx)
-	s.serverStopF = cancel
+	s.serverStopF.Store(&cancel)
 
 	eCfg := echo.StartConfig{
 		Address:         s.cfg.BuildHostPort(),
@@ -122,7 +133,7 @@ func (s *Server) Start(ctx context.Context) error {
 func (s *Server) Stop(ctx context.Context) error {
 	xlog.Infof(ctx, "shutdown http server: '%s'", s.cfg.Name)
 
-	s.serverStopF()
+	(*s.serverStopF.Load())()
 
 	xlog.Infof(ctx, "http server is shutdown: '%s'", s.cfg.Name)
 

@@ -123,3 +123,44 @@ func get(t *testing.T, url string) (body string, ok bool) {
 
 	return string(raw), true
 }
+
+// TestStopIsSafeFromAnotherGoroutine pins the concurrency contract Start and Stop
+// have with each other: Start assigns the cancel func, Stop reads it, and a
+// service necessarily calls them from different goroutines — one blocks on
+// Start while the shutdown path calls Stop.
+//
+// The field behind that used to be a plain func(), which -race reports as a data
+// race under exactly this (normal) usage. Beyond the report, a lost write could
+// leave Stop calling the no-op and the shutdown hanging.
+//
+// Honest scope: this test does NOT reproduce the race on its own. Waiting for
+// the bind synchronises the two goroutines and closes the window, and removing
+// that wait makes the test race Stop against a server that may not have started
+// — flaky in the other direction. What reproduced it reliably was the Console's
+// TestDrainAndStopOrdersTeardown, which starts both servers and stops them from
+// a third goroutine. This test pins the contract and the no-op-before-Start
+// behaviour; -race in a consumer's suite is what guards the field itself.
+func TestStopIsSafeFromAnotherGoroutine(t *testing.T) {
+	t.Parallel()
+
+	ctx, _ := observedContext(t)
+	port := freePort(t)
+	s := server.New(server.Config{Name: "race", Host: "127.0.0.1", Port: port})
+
+	started := make(chan error, 1)
+	go func() { started <- s.Start(ctx) }()
+
+	// Stop from this goroutine while Start is still settling in the other — the
+	// window the race lives in. Waiting for the bind first means the write in
+	// Start has certainly happened, so the test exercises the read/write pair
+	// rather than racing to call Stop before Start ever began.
+	requireListening(t, port)
+	require.NoError(t, s.Stop(ctx))
+
+	select {
+	case err := <-started:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start did not unblock after a concurrent Stop")
+	}
+}
