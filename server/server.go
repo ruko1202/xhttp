@@ -71,6 +71,16 @@ func (s *Server) Start(ctx context.Context) error {
 		Address:         s.cfg.BuildHostPort(),
 		HideBanner:      true,
 		GracefulTimeout: cmp.Or(s.cfg.GracefulTimeout, DefaultGracefulTimeout),
+		// Echo builds the http.Server internally, so this hook — which runs
+		// after the listener binds and before Serve — is the only place its
+		// timeouts can be set. It is installed unconditionally and stamps only
+		// non-zero fields, so an all-zero Config leaves the server exactly as
+		// Echo built it.
+		BeforeServeFunc: func(hs *http.Server) error {
+			s.cfg.applyTimeouts(hs)
+
+			return nil
+		},
 		OnShutdownError: func(err error) {
 			xlog.Errorf(ctx, "shutdown http server '%s' failed: %v", s.cfg.Name, err)
 		},
