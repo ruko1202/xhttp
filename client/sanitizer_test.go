@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ruko1202/xhttp/client"
+	"github.com/ruko1202/xhttp/sanitize"
 )
 
 // TestNoopSanitizerLogsSecrets pins the documented default. It reads like a
@@ -119,7 +120,7 @@ func TestSanitizerMasksURL(t *testing.T) {
 func TestNoopSanitizerReturnsInputUnchanged(t *testing.T) {
 	t.Parallel()
 
-	s := client.NewNoopSanitizer()
+	s := sanitize.NewNoopSanitizer()
 	header := http.Header{"Authorization": []string{"Bearer " + secret}}
 
 	assert.Equal(t, "https://example.com/"+secret, s.SanitizeURL("https://example.com/"+secret))

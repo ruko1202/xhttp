@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"time"
+
+	"github.com/ruko1202/xhttp/sanitize"
 )
 
 // WithTimeout overrides the total request timeout. A non-positive value is
@@ -49,13 +51,13 @@ func WithCustomRedirectFlow(redirectFlow func(*http.Request, []*http.Request) er
 }
 
 // WithSanitizer installs the redaction policy used for every logged URL, header
-// set and body. Without it the client uses NoopSanitizer and logs everything
-// verbatim, secrets included.
+// set and body. Without it the client uses sanitize.NoopSanitizer and logs
+// everything verbatim, secrets included.
 //
 // A nil sanitizer is ignored rather than installed: a client that logs raw
 // credentials because a constructor argument was nil is worse than one that
 // keeps whatever policy it already had.
-func WithSanitizer(s Sanitizer) Option {
+func WithSanitizer(s sanitize.Sanitizer) Option {
 	return func(c *http.Client) {
 		tr, ok := c.Transport.(*transport)
 		if !ok || s == nil {
