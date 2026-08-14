@@ -2,7 +2,7 @@ module github.com/ruko1202/xhttp
 
 go 1.25.0
 
-toolchain go1.25.12
+toolchain go1.25.13
 
 require (
 	github.com/labstack/echo-contrib/v5 v5.0.1
