@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"syscall"
 	"time"
 
@@ -26,7 +27,8 @@ func WithTimeout(timeout time.Duration) Option {
 //
 // Note that options which reach into the logging round-tripper —
 // WithCallerBeforeDo, WithCallerAfterDo, WithSanitizer, WithBodyLogging,
-// WithDialGuard, WithoutInternalHosts — look up that wrapper on the client.
+// WithDialGuard, WithoutInternalHosts, WithProxy — look up that wrapper on the
+// client.
 // Replacing the whole c.Transport from outside (rather than through this
 // option) removes it, and those options then become silent no-ops.
 //
@@ -89,6 +91,10 @@ func WithDialGuard(guard dialguard.Guard) Option {
 		tr.dialer.ControlContext = func(_ context.Context, network, address string, _ syscall.RawConn) error {
 			return guard(network, address)
 		}
+		// Control stays nil: net.Dialer ignores it entirely while
+		// ControlContext is set, so leaving it empty keeps the two from
+		// ever disagreeing about which hook is live.
+		tr.dialer.Control = nil
 	}
 }
 
@@ -117,6 +123,41 @@ func WithDialGuard(guard dialguard.Guard) Option {
 // has to be produced by the caller.
 func WithoutInternalHosts() Option {
 	return WithDialGuard(dialguard.Blocking(dialguard.InternalPrefixes()...))
+}
+
+// WithProxy overrides how the client picks a proxy for a request, replacing the
+// default http.ProxyFromEnvironment. Returning a nil *url.URL for a request
+// sends it directly.
+//
+// A nil function is ignored rather than installed, since that would disable
+// proxying rather than configure it — pass a function returning (nil, nil) if
+// going direct is what you want.
+//
+// Note the same rule points the other way here than it does for WithDialGuard.
+// There, ignoring nil preserves a security control; here it preserves
+// http.ProxyFromEnvironment, which is the thing that defeats a dial guard. "nil
+// is ignored" means "the earlier setting stands", not "fails safe".
+//
+// Worth knowing when a dial guard is installed: a proxied request is not
+// covered by it. The dialer connects to the proxy, so that is the only address
+// the guard ever sees; the real destination is carried in the request itself —
+// measured on go1.25.13, in the request line for http and in a CONNECT for
+// https. Routing a guarded client through a proxy therefore disables the
+// protection for every proxied destination, whatever the scheme.
+//
+// Do not interpolate the proxy URL into an error this function returns. Such an
+// error is surfaced by net/http and logged at error level without passing
+// through the sanitizer, and a proxy URL routinely carries credentials — that
+// is how HTTPS_PROXY auth is expressed. Name the host, not the URL.
+func WithProxy(proxy func(*http.Request) (*url.URL, error)) Option {
+	return func(c *http.Client) {
+		tr, ok := c.Transport.(*transport)
+		if !ok || proxy == nil {
+			return
+		}
+
+		tr.tr.Proxy = proxy
+	}
 }
 
 // WithoutRedirect stops the client from following redirects, returning the

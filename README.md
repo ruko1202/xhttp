@@ -115,6 +115,7 @@ corrupts the second attempt.
 | `WithCallerBeforeDo(f)` | Hook run before the request is sent — and before it is logged. |
 | `WithCallerAfterDo(f)` | Hook run after a successful round-trip. |
 | `WithBodyLogging()` | Dumps request and response bodies at debug level. |
+| `WithProxy(f)` | Overrides proxy selection, replacing `http.ProxyFromEnvironment`. `nil` is ignored. |
 | `WithDialGuard(g)` | Refuses a connection when `g` rejects the resolved address. `nil` is ignored. |
 | `WithoutInternalHosts()` | `WithDialGuard` over the default deny list. Off unless asked for. |
 
@@ -182,9 +183,11 @@ is worse than no guard, because you stop looking.
 
 - **An HTTP proxy bypasses it.** The default transport honors
   `http.ProxyFromEnvironment`. With a proxy set, the dialer connects to the
-  *proxy* and the real target travels inside a `CONNECT`, unseen by the guard.
+  *proxy* — the only address the guard ever sees — while the real target rides
+  in the request itself: the request line for `http`, a `CONNECT` for `https`.
   `NO_PROXY` makes that partial rather than all-or-nothing: destinations it
   exempts are dialed directly and are guarded.
+
 - **`WithTransport` removes it, in either option order.** Replacing the
   transport discards the dialer the guard lives on; applied afterwards, the
   option no longer finds the wrapper it needs. The client looks configured and

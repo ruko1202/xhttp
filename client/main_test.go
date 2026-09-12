@@ -61,6 +61,10 @@ type recordedRequest struct {
 
 // echoServer replies 200 with a fixed JSON body plus a Set-Cookie carrying the
 // secret, and records the request it saw.
+//
+// One instance serves one request at a time: the recording is unsynchronized,
+// so pointing concurrent requests at a single instance is a data race the race
+// detector will find. Give each parallel subtest its own.
 func echoServer(t *testing.T) (srvURL string, seen *recordedRequest) {
 	t.Helper()
 
