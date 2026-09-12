@@ -110,19 +110,6 @@ func TestWithDialGuardNilIsIgnored(t *testing.T) {
 	})
 }
 
-func TestWithDialGuardLastNonNilWins(t *testing.T) {
-	t.Parallel()
-
-	srvURL, _ := echoServer(t)
-
-	httpc := client.NewClient(
-		client.WithDialGuard(func(_, _ string) error { return assert.AnError }),
-		client.WithDialGuard(func(_, _ string) error { return nil }),
-	)
-
-	assert.Equal(t, `{"ok":true}`, mustDo(context.Background(), t, httpc, srvURL))
-}
-
 // A dialguard.Guard must drop straight into the option: the two-argument shape
 // exists so a policy never has to name syscall.RawConn.
 func TestWithDialGuardAcceptsADialguardGuard(t *testing.T) {

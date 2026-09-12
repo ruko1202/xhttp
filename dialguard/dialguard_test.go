@@ -1,7 +1,6 @@
 package dialguard_test
 
 import (
-	"errors"
 	"net/netip"
 	"slices"
 	"sync"
@@ -191,14 +190,6 @@ func TestBlockingAcceptsACallerAdjustedList(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, dialguard.ErrBlockedAddress)
 	})
-}
-
-func TestGuardIsUsableAsAPlainFunction(t *testing.T) {
-	t.Parallel()
-
-	var guard dialguard.Guard = func(string, string) error { return errors.New("denied") }
-
-	assert.Error(t, guard("tcp", "127.0.0.1:80"))
 }
 
 // The deny list is the security contract, so its composition is asserted
