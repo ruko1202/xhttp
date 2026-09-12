@@ -7,7 +7,7 @@ in through [xlog](https://github.com/ruko1202/xlog).
 go get github.com/ruko1202/xhttp
 ```
 
-Five packages, imported separately so you only pay for what you use — `client`
+Six packages, imported separately so you only pay for what you use — `client`
 is plain `net/http` and does not pull Echo into your binary:
 
 | Package | What it gives you |
@@ -17,6 +17,7 @@ is plain `net/http` and does not pull Echo into your binary:
 | [`infra`](#infra) | a whole infra server — health, version, metrics, pprof, swagger |
 | [`lifecycle`](#lifecycle) | the graceful-drain signal that makes readiness meaningful |
 | [`sanitize`](#sanitize) | the redaction policy `client` and `server` both log through |
+| [`dialguard`](#dialguard) | the address policy that stops a client dialing inside your network |
 
 Requires Go 1.25 and, for `server`/`infra`, Echo v5.2.1 or newer. The Echo
 dependency is deliberate and unabstracted: `server.Echo()` hands you the real
@@ -114,6 +115,8 @@ corrupts the second attempt.
 | `WithCallerBeforeDo(f)` | Hook run before the request is sent — and before it is logged. |
 | `WithCallerAfterDo(f)` | Hook run after a successful round-trip. |
 | `WithBodyLogging()` | Dumps request and response bodies at debug level. |
+| `WithDialGuard(g)` | Refuses a connection when `g` rejects the resolved address. `nil` is ignored. |
+| `WithoutInternalHosts()` | `WithDialGuard` over the default deny list. Off unless asked for. |
 
 There is no bearer-token option: authentication is the caller's concern, and
 `WithCallerBeforeDo` is all it takes.
@@ -126,6 +129,78 @@ client.WithCallerBeforeDo(func(_ context.Context, r *http.Request) {
 
 Hooks run before the request is logged, so headers they add are visible to the
 sanitizer and are therefore actually subject to redaction.
+
+### Guarding where the client may dial
+
+When a destination comes from outside the service — an issuer URL an
+administrator types into a form, a callback address in a payload — the fetch is
+an SSRF primitive: it can be aimed at `169.254.169.254`, at an admin port on
+loopback, or at a neighbor on a private range. `WithoutInternalHosts` refuses
+those connections.
+
+```go
+httpc := client.NewClient(
+    client.WithoutInternalHosts(),
+    client.WithSanitizer(mySanitizer),
+)
+```
+
+It is **off by default** and should stay off where the destination is your own:
+xhttp is also how services reach each other inside the perimeter, and a guard
+enabled by default would break that silently.
+
+The check runs in `net.Dialer.Control`, on the resolved address, immediately
+before `connect(2)`. That placement is the point. Validating the URL string
+cannot work — measured on go1.25.13, `127.1`, `2130706433`, `0x7f000001` and
+`017700000001` are all rejected by `net.ParseIP` and `netip.ParseAddr`, and all
+resolved to `127.0.0.1` by the resolver, so a string check lives in the gap
+between them. And because the guard runs per connection — redirects, retries,
+and once per address the resolver returned — it also closes DNS rebinding,
+which a check made when a URL is *stored* never can.
+
+For a policy of your own, build one from `dialguard` and pass it to
+`WithDialGuard`:
+
+```go
+// The default list, minus one network you do reach on purpose. DeleteFunc
+// edits in place, which is safe here precisely because InternalPrefixes hands
+// out a slice of its own each time.
+allowed := slices.DeleteFunc(dialguard.InternalPrefixes(), func(p netip.Prefix) bool {
+    return p == netip.MustParsePrefix("10.0.0.0/8")
+})
+
+httpc := client.NewClient(client.WithDialGuard(dialguard.Blocking(allowed...)))
+```
+
+`WithDialGuard` takes any `func(network, address string) error`, so an
+allow-list is a few lines over `dialguard.IsInternal`.
+
+#### What it does not cover
+
+Worth knowing before relying on it — a guard whose blind spots are undocumented
+is worse than no guard, because you stop looking.
+
+- **An HTTP proxy bypasses it.** The default transport honors
+  `http.ProxyFromEnvironment`. With a proxy set, the dialer connects to the
+  *proxy* and the real target travels inside a `CONNECT`, unseen by the guard.
+  `NO_PROXY` makes that partial rather than all-or-nothing: destinations it
+  exempts are dialed directly and are guarded.
+- **`WithTransport` removes it, in either option order.** Replacing the
+  transport discards the dialer the guard lives on; applied afterwards, the
+  option no longer finds the wrapper it needs. The client looks configured and
+  is not.
+- **A denial refuses one address, not the dial.** When a name resolves to
+  several addresses, the dialer treats a refusal as a failed attempt and tries
+  the next one — so a policy that covers IPv4 but not IPv6 (or the reverse)
+  blocks nothing at all. `WithoutInternalHosts` is safe here because its list
+  covers both families of every range; a hand-built list must do the same.
+- **It runs per connection, not per request.** A connection the guard approved
+  stays in the pool (`IdleConnTimeout` is 90s) and serves later requests
+  without being consulted again.
+- **The error names an address, not a host.** The guard sees only what the
+  resolver returned, so a message telling an operator *which URL* was rejected
+  has to come from your code. Validating the URL on input is worth doing for
+  that reason — as a second layer, not a replacement.
 
 ### Body logging
 
@@ -259,6 +334,39 @@ There is deliberately one name for this type rather than a per-package alias:
 a service that redacts credentials wants the same policy applied on the way out
 and on the way in, and two names for one contract only invite them to drift.
 
+## `dialguard`
+
+The address policy `client` dials through, as a package of its own so a service
+can name one without importing `client`.
+
+```go
+import "github.com/ruko1202/xhttp/dialguard"
+
+guard := dialguard.Blocking(dialguard.InternalPrefixes()...)
+err := guard("tcp4", "169.254.169.254:80") // errors.Is(err, dialguard.ErrBlockedAddress)
+```
+
+| Symbol | What it is |
+|---|---|
+| `Guard` | `func(network, address string) error` — the shape `WithDialGuard` takes. |
+| `ErrBlockedAddress` | Wrapped by every denial, so `errors.Is` tells a block from a timeout. |
+| `InternalPrefixes()` | The default deny list, a fresh slice per call. |
+| `IsInternal(addr)` | Whether an address falls in that list. |
+| `Blocking(prefixes...)` | A `Guard` denying anything inside `prefixes`. |
+
+`InternalPrefixes` is explicit prefixes rather than the `net.IP` predicates,
+because those cover less than they look like they do: `IsPrivate` is only
+RFC1918 and `fc00::/7`, `IsUnspecified` matches `0.0.0.0` but not the
+`0.0.0.0/8` around it, and four IPv6 forms that carry an IPv4 target inside them
+satisfy no predicate at all. `::ffff:0:7f00:1` is the one to know: it is
+`127.0.0.1` in IPv4-*translated* form, it is not what `::ffff:127.0.0.1` is,
+`Unmap` does nothing to it, and only an explicit `::ffff:0:0:0/96` stops it.
+
+`Blocking` parses before it consults the list, so an address it cannot
+understand is refused whatever the list holds — including a `unix` socket path.
+A guard that fails open on input it does not understand is one an attacker only
+has to confuse.
+
 ## `lifecycle`
 
 The drain signal, in its own package because it imports nothing but
@@ -289,6 +397,7 @@ can report "not ready" without owning process-shutdown state.
 | Proxy | `http.ProxyFromEnvironment` |
 | HTTP/2 | attempted |
 | Body log cap | 4 KiB |
+| SSRF dial guard | off (see `WithoutInternalHosts`) |
 
 `server`:
 

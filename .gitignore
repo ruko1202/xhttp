@@ -19,3 +19,8 @@
 
 # Coverage output (make test-cov)
 coverage.out
+
+# flow skill artifacts
+.flow/
+SPEC.md
+tasks/
