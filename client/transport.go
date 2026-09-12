@@ -19,7 +19,12 @@ import (
 // It owns the redaction policy and the caller hooks; the options that configure
 // them find it by type-asserting http.Client.Transport.
 type transport struct {
-	tr              *http.Transport
+	tr *http.Transport
+	// dialer is the same *net.Dialer whose DialContext tr holds, kept here so
+	// WithDialGuard can install its hook on it. A transport primitive on the
+	// logging wrapper looks out of place, but the alternative is a second way
+	// to reach into the client, and this one already exists.
+	dialer          *net.Dialer
 	beforeRoundTrip []func(context.Context, *http.Request)
 	afterRoundTrip  []func(context.Context, *http.Response)
 	sanitizer       sanitize.Sanitizer
@@ -39,6 +44,7 @@ func newTransport() *transport {
 	}
 
 	tr := &transport{
+		dialer: dialer,
 		tr: &http.Transport{
 			Proxy:             http.ProxyFromEnvironment,
 			ForceAttemptHTTP2: true,
@@ -46,7 +52,10 @@ func newTransport() *transport {
 			// instead of dialing on every call.
 			MaxIdleConns:        1000,
 			MaxIdleConnsPerHost: 100,
-			DialContext:         dialer.DialContext,
+			// DialTLSContext is deliberately left nil: with it unset, HTTPS
+			// dials go through DialContext too, which is what puts a
+			// WithDialGuard hook in front of TLS destinations as well.
+			DialContext: dialer.DialContext,
 			// Time allowed for the TLS handshake; matters on lossy networks.
 			TLSHandshakeTimeout: 5 * time.Second,
 			// Caps the wait for response headers. Guards against a server that
