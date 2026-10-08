@@ -259,8 +259,10 @@ afterwards is unsupported.
 > out from under a request still being served — hold your own drain window
 > first.
 
-`RequestLoggingMiddleware` writes one structured line per request;
-`BodyDumpLoggingMiddleware` adds request/response bodies at debug level, capped
+`RequestLoggingMiddleware` writes one structured line per request: `REQUEST`
+at info, or `REQUEST_ERROR` when the handler returned an error — at warn for a
+4xx response and at error for anything else (5xx, or an error with no HTTP
+status, which is served as 500). `BodyDumpLoggingMiddleware` adds request/response bodies at debug level, capped
 at 10 KiB, and is meant for development because it buffers every body in
 memory. Both skip paths containing `swagger`, whose asset stream would drown
 real traffic.
