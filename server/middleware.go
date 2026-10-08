@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -36,6 +37,13 @@ func BaseMiddlewares() []echo.MiddlewareFunc {
 // The field names and the REQUEST / REQUEST_ERROR message literals are a
 // contract: log queries and alerts are written against them, so renaming one
 // is a breaking change for every dashboard downstream.
+//
+// A request whose handler returned no error is logged as REQUEST at INFO. One
+// that returned an error is logged as REQUEST_ERROR, and the response status
+// decides the level: 4xx is WARN (a client mistake or a rate limit is not a
+// server fault), anything else — 5xx, including an error that carries no
+// HTTP status and is therefore served as 500 — is ERROR. The status is the
+// logged "status" field: the one the error handler wrote to the client.
 //
 // The logged URI includes the query string verbatim. A service whose URLs carry
 // credentials — an OAuth callback holding a live authorization code is the usual
@@ -105,7 +113,12 @@ func RequestLoggingMiddlewareWithSanitizer(s sanitize.Sanitizer) echo.Middleware
 			}
 
 			if v.Error != nil {
-				xlog.Error(ctx, "REQUEST_ERROR", append(attrs, xfield.Error(v.Error))...)
+				attrs = append(attrs, xfield.Error(v.Error))
+				if isClientError(v.Status) {
+					xlog.Warn(ctx, "REQUEST_ERROR", attrs...)
+				} else {
+					xlog.Error(ctx, "REQUEST_ERROR", attrs...)
+				}
 
 				return nil //nolint:nilerr
 			}
@@ -183,6 +196,14 @@ func BodyDumpLoggingMiddlewareWithSanitizer(s sanitize.Sanitizer) echo.Middlewar
 				append(attrs, xfield.String("body", string(s.SanitizeBody(respDump))))...)
 		},
 	})
+}
+
+// isClientError reports whether status is a 4xx. With HandleError on, Echo
+// resolves RequestLoggerValues.Status after the error handler has run, so it
+// is the status committed to the client; an error the handler could not map
+// to a status arrives here as 500.
+func isClientError(status int) bool {
+	return status >= http.StatusBadRequest && status < http.StatusInternalServerError
 }
 
 func skipper(urlPaths ...string) middleware.Skipper {

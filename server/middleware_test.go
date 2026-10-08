@@ -13,6 +13,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/ruko1202/xhttp/server"
 )
@@ -98,6 +99,46 @@ func TestRequestLoggingMiddleware(t *testing.T) {
 		require.Subset(t, keysOf(fields), requestLogKeys)
 		require.Contains(t, keysOf(fields), "error")
 		require.Empty(t, logs.FilterMessage("REQUEST").All())
+	})
+
+	// The HTTP status the client got decides the level of a REQUEST_ERROR line:
+	// a client mistake or a rate limit is not a server fault and must not page
+	// anyone, while a 5xx or an error with no status (served as 500) must.
+	t.Run("logs REQUEST_ERROR at the level of the status", func(t *testing.T) {
+		t.Parallel()
+
+		cases := []struct {
+			name   string
+			err    error
+			status int
+			level  zapcore.Level
+		}{
+			{"400", echo.ErrBadRequest, http.StatusBadRequest, zapcore.WarnLevel},
+			{"404", echo.ErrNotFound, http.StatusNotFound, zapcore.WarnLevel},
+			{"429", echo.ErrTooManyRequests, http.StatusTooManyRequests, zapcore.WarnLevel},
+			{"500", echo.ErrInternalServerError, http.StatusInternalServerError, zapcore.ErrorLevel},
+			{"plain error", errors.New("nope"), http.StatusInternalServerError, zapcore.ErrorLevel},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				ctx, logs := observedContext(t)
+
+				e := echo.New()
+				e.Use(server.RequestLoggingMiddleware())
+				e.GET("/fail", func(*echo.Context) error { return tc.err })
+
+				rec := serveCtx(ctx, t, e, http.MethodGet, "/fail", nil)
+				require.Equal(t, tc.status, rec.Code)
+
+				entries := logs.FilterMessage("REQUEST_ERROR").All()
+				require.Len(t, entries, 1)
+				require.Equal(t, tc.level, entries[0].Level)
+				require.EqualValues(t, tc.status, entries[0].ContextMap()["status"])
+			})
+		}
 	})
 
 	t.Run("skips swagger paths", func(t *testing.T) {
