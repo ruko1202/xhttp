@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ruko1202/xlog"
@@ -37,6 +38,11 @@ var errProbe = errors.New("dependency down")
 type stubDrainer struct{ draining bool }
 
 func (d stubDrainer) IsDraining() bool { return d.draining }
+
+// stubStarter reports a fixed start-up state.
+type stubStarter struct{ ready bool }
+
+func (s stubStarter) IsReady() bool { return s.ready }
 
 // observedContext returns a context carrying a logger whose records are
 // captured, so tests can assert on what an operator would see.
@@ -102,6 +108,15 @@ func okCheck(name string) infra.Check {
 // failingCheck is a readiness probe that always fails.
 func failingCheck(name string) infra.Check {
 	return infra.Check{Name: name, Probe: func(context.Context) error { return errProbe }}
+}
+
+// countingFailingCheck is a readiness probe that always fails and counts its
+// calls, so a test can assert the probes were never reached.
+func countingFailingCheck(name string, calls *atomic.Int32) infra.Check {
+	return infra.Check{Name: name, Probe: func(context.Context) error {
+		calls.Add(1)
+		return errProbe
+	}}
 }
 
 // newServer builds an infra server for the given config, defaulting the parts

@@ -11,7 +11,7 @@
 // Always registered:
 //
 //	GET /liveness         204, unconditionally — the process is running
-//	GET /readiness        204 ready, 503 draining, 500 a dependency is down
+//	GET /readiness        204 ready, 503 draining or starting, 500 a dependency is down
 //	GET /version          200, the build metadata supplied in Config
 //	GET /metrics          200, the Prometheus default registry
 //	GET /debug/pprof/*    the standard profiling endpoints
@@ -61,6 +61,13 @@ type Config struct {
 	// value means "never draining", which is the right default for a service
 	// that does not implement draining — not a reason to panic on every probe.
 	Drainer lifecycle.DrainChecker
+
+	// Starter reports whether main has declared start-up complete. Until it
+	// does, /readiness answers 503 without running the probes, so a replica
+	// that is still initializing neither receives traffic nor logs an error on
+	// every health-check poll. A nil value means "always started", which keeps
+	// the pre-Starter behavior for services that do not gate start-up.
+	Starter lifecycle.ReadyChecker
 
 	// Specs are the OpenAPI documents offered in the Swagger UI selector. Empty
 	// means no /swagger route, even in dev.

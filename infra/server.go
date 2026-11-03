@@ -20,6 +20,13 @@ type noopDrainChecker struct{}
 
 func (noopDrainChecker) IsDraining() bool { return false }
 
+// alwaysReadyChecker stands in for an absent Starter for the same reason. It
+// reports ready, not unready: a service that never wired a Starter has nobody
+// to call MarkReady, and would otherwise be held at 503 forever.
+type alwaysReadyChecker struct{}
+
+func (alwaysReadyChecker) IsReady() bool { return true }
+
 // New creates the infra server and registers its routes.
 //
 // Options are passed through to the underlying HTTP shell, so WithLogger,
@@ -33,6 +40,10 @@ func (noopDrainChecker) IsDraining() bool { return false }
 func New(cfg Config, opts ...server.Option) *Server {
 	if cfg.Drainer == nil {
 		cfg.Drainer = noopDrainChecker{}
+	}
+
+	if cfg.Starter == nil {
+		cfg.Starter = alwaysReadyChecker{}
 	}
 
 	for _, check := range cfg.Checks {

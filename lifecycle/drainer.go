@@ -1,15 +1,17 @@
 // Package lifecycle holds process-lifecycle state shared between a service's
-// main function and its HTTP layer — currently the graceful-drain signal that
-// powers zero-downtime rolling deploys.
+// main function and its HTTP layer: the start-up gate (Starter) that holds a
+// replica out of the pool until every module has started, and the
+// graceful-drain signal (Drainer) that powers zero-downtime rolling deploys.
 //
-// Ownership: main creates the Drainer and is the only caller of StartDraining
-// (from its shutdown path). Readers (e.g. a readiness handler) take it as a
-// narrow DrainChecker interface, so a request handler never owns or mutates
-// process-shutdown state.
+// Ownership: main creates both and is the only caller of MarkReady (once
+// start-up is complete) and StartDraining (from its shutdown path). Readers
+// (e.g. a readiness handler) take them as the narrow ReadyChecker and
+// DrainChecker interfaces, so a request handler never owns or mutates
+// process-lifecycle state.
 //
 // The package deliberately imports nothing beyond sync/atomic: a service that
-// owns drain state but runs no infra server can depend on it without pulling
-// in an HTTP framework.
+// owns lifecycle state but runs no infra server can depend on it without
+// pulling in an HTTP framework.
 package lifecycle
 
 import "sync/atomic"
