@@ -15,7 +15,7 @@ is plain `net/http` and does not pull Echo into your binary:
 | [`client`](#client) | an `*http.Client` that logs and traces every exchange |
 | [`server`](#server) | the Echo v5 lifecycle shell: bind, start, stop, request logging |
 | [`infra`](#infra) | a whole infra server — health, version, metrics, pprof, swagger |
-| [`lifecycle`](#lifecycle) | the graceful-drain signal that makes readiness meaningful |
+| [`lifecycle`](#lifecycle) | the start-up gate and graceful-drain signal that make readiness meaningful |
 | [`sanitize`](#sanitize) | the redaction policy `client` and `server` both log through |
 | [`dialguard`](#dialguard) | the address policy that stops a client dialing inside your network |
 
@@ -281,6 +281,7 @@ import (
 )
 
 drainer := lifecycle.NewDrainer()
+starter := lifecycle.NewStarter()
 
 srv := infra.New(infra.Config{
     Server:  xhttpserver.Config{Name: "infra", Host: "0.0.0.0", Port: 8001},
@@ -288,25 +289,33 @@ srv := infra.New(infra.Config{
     Version: infra.VersionInfo{AppName: "myservice", Version: version},
     Checks:  []infra.Check{{Name: "postgres", Probe: db.PingContext}},
     Drainer: drainer,
+    Starter: starter, // nil means "always started"
 })
 
 go srv.Start(ctx) // routes are already registered
+
+// ... start every other module ...
+
+starter.MarkReady() // only now does /readiness stop answering 503
 ```
 
 | Route | Behaviour |
 |---|---|
 | `GET /liveness` | 204, unconditionally — checks nothing on purpose, so a database blip cannot cause a restart loop |
-| `GET /readiness` | 204 ready · 503 draining · 500 a check failed |
+| `GET /readiness` | 204 ready · 503 draining or starting · 500 a check failed |
 | `GET /version` | 200, the `VersionInfo` you supplied |
 | `GET /metrics` | 200, the Prometheus default registry |
 | `GET /debug/pprof/*` | the standard profiles, in **every** environment |
 | `GET /` | index page — `Dev` only |
 | `GET /swagger/*` | Swagger UI — `Dev` only, and only when `Specs` is non-empty |
 
-Readiness checks drain **before** probes, and that ordering is a contract: 503
-means "planned drain", 500 means "a dependency is down". A draining replica
-whose database is already closed must not report an outage during a routine
-deploy.
+Readiness checks drain, then start-up, **before** probes, and that ordering is
+a contract: 503 means "planned: draining or starting", 500 means "a dependency
+is down". A draining replica whose database is already closed must not report
+an outage during a routine deploy, and a starting replica must neither receive
+traffic before `MarkReady` nor log an error on every health-check poll while
+its modules come up — so readiness does not depend on the order in which they
+initialize.
 
 Only the not-found route is request-logged. Health checkers poll every couple
 of seconds forever; logging them buries everything else.
@@ -374,17 +383,23 @@ has to confuse.
 
 ## `lifecycle`
 
-The drain signal, in its own package because it imports nothing but
-`sync/atomic` — a service that owns drain state but runs no infra port can
-depend on it without pulling in Echo.
+The start-up gate and the drain signal, in their own package because it
+imports nothing but `sync/atomic` — a service that owns lifecycle state but
+runs no infra port can depend on it without pulling in Echo.
 
 ```go
+starter := lifecycle.NewStarter() // main owns it; starts not ready
+starter.MarkReady()               // once every module has started; one-way
+
 drainer := lifecycle.NewDrainer() // main owns it
 drainer.StartDraining()           // from the shutdown path; one-way
 ```
 
-Handlers take the read-only `lifecycle.DrainChecker` view, so a request handler
-can report "not ready" without owning process-shutdown state.
+Handlers take the read-only `lifecycle.ReadyChecker` and
+`lifecycle.DrainChecker` views, so a request handler can report "not ready"
+without owning process-lifecycle state. `Starter` is deliberately separate from
+`Drainer`: a service that wires only a `Drainer` never calls `MarkReady`, and
+must not be held at 503 forever.
 
 ## Defaults
 
